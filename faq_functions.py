@@ -53,7 +53,7 @@ class DubaiFAQService:
             # Initialize Gemini
             print("🤖 Initializing Gemini LLM...")
             genai.configure(api_key=GEMINI_API_KEY)
-            self.gemini_model = genai.GenerativeModel('gemini-pro')
+            self.gemini_model = genai.GenerativeModel('gemini-2.5-pro')
             
             # Initialize Pinecone
             print("📍 Connecting to Pinecone...")
