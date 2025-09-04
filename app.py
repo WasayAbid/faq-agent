@@ -1,12 +1,4 @@
-"""
-app.py
-======
-Clean Chainlit interface for Dubai FAQ system.
-Contains only UI logic and function calls to business logic.
-
-Usage:
-    chainlit run app.py
-"""
+# app.py
 
 import asyncio
 import chainlit as cl
@@ -61,7 +53,12 @@ What would you like to know about Dubai? 🤔
         method = result.get('method', 'unknown')
         answer = result.get('answer', 'No answer available')
         
-        if method == "vector_match":
+        # --- NEW --- Add a condition to handle SQL matches
+        if method == "sql_match":
+            # SQL Database match
+            response_content = f"✅ **Found in Database**\n\n{answer}"
+        
+        elif method == "vector_match":
             # FAQ Database match
             similarity_score = result.get('similarity_score', 0)
             response_content = f"📊 **Found in FAQ Database** (Match: {similarity_score:.1%})\n\n{answer}"
@@ -196,7 +193,9 @@ if __name__ == "__main__":
     print("📁 Architecture:")
     print("  ├── app.py (Chainlit UI - this file)")
     print("  ├── faq_functions.py (Business Logic)")
-    print("  └── workflow_manager.py (LangGraph Workflow)")
+    print("  ├── workflow_manager.py (LangGraph Workflow)")
+    print("  ├── load_sql.py (Database Setup)")
+    print("  └── dubai_faq.db (SQLite Database)")
     print("=" * 50)
     print(f"🌐 Starting Chainlit server...")
     print(f"📱 Access the app at: http://localhost:8000")

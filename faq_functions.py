@@ -1,11 +1,7 @@
-"""
-faq_functions.py
-===============
-Core business logic functions for Dubai FAQ system.
-Contains all the actual processing functions without UI dependencies.
-"""
+# faq_functions.py
 
 import os
+import sqlite3 # --- NEW --- Import the sqlite3 library
 from typing import TypedDict, Optional
 from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
@@ -20,13 +16,14 @@ PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 INDEX_NAME = os.getenv("INDEX_NAME", "dubai-faq-index")
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.75"))
+DB_FILE = "dubai_faq.db" # --- NEW --- Define database file name
 
 # State definition
 class FAQState(TypedDict):
     question: str
     answer: Optional[str]
     similarity_score: Optional[float]
-    method: Optional[str]  # "vector_match" or "llm_generated"
+    method: Optional[str]  # "sql_match", "vector_match", "llm_generated", etc. # --- MODIFIED ---
     matched_question: Optional[str]
     error: Optional[str]
 
@@ -46,6 +43,12 @@ class DubaiFAQService:
             if not GEMINI_API_KEY:
                 raise ValueError("GEMINI_API_KEY not found in environment variables!")
             
+            # --- NEW --- Check if database file exists
+            if not os.path.exists(DB_FILE):
+                raise FileNotFoundError(f"Database file '{DB_FILE}' not found. Please run 'load_sql.py' first.")
+            print(f"✔️ Database file '{DB_FILE}' found.")
+            # --- END NEW ---
+
             # Initialize embedding model
             print("🧠 Loading embedding model...")
             self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -65,6 +68,41 @@ class DubaiFAQService:
         except Exception as e:
             print(f"❌ Service initialization failed: {e}")
             raise
+
+    # --- NEW FUNCTION ---
+    def query_sql_database(self, state: FAQState) -> FAQState:
+        """
+        Search the SQLite database for an exact match to the question.
+        This is the first step in the workflow.
+        """
+        try:
+            question = state["question"]
+            print(f"🔍 Searching SQL database for: '{question}'")
+            
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            
+            # Query for an exact, case-insensitive match
+            # The '?' is a placeholder to prevent SQL injection
+            cursor.execute("SELECT answer FROM faqs WHERE lower(question) = lower(?)", (question.strip(),))
+            result = cursor.fetchone()
+            
+            conn.close()
+            
+            if result:
+                answer = result[0]
+                state["answer"] = answer
+                state["method"] = "sql_match"
+                print(f"✅ Found exact match in SQL database.")
+            else:
+                print("❌ No exact match found in SQL database.")
+
+        except Exception as e:
+            print(f"🚨 SQL search error: {e}")
+            state["error"] = f"SQL search failed: {str(e)}"
+            
+        return state
+    # --- END NEW FUNCTION ---
     
     def search_vector_database(self, state: FAQState) -> FAQState:
         """
@@ -76,6 +114,11 @@ class DubaiFAQService:
         Returns:
             Updated state with search results
         """
+        # --- NEW --- Skip this step if we already have an answer from SQL
+        if state.get("answer") is not None:
+            return state
+        # --- END NEW ---
+
         try:
             question = state["question"]
             print(f"🔍 Searching vector database for: '{question}'")
@@ -167,10 +210,31 @@ class DubaiFAQService:
         
         print(f"✅ Response finalized using method: {state.get('method', 'unknown')}")
         return state
-    
+
+    # --- NEW ROUTING FUNCTION ---
+    def should_search_vector_db(self, state: FAQState) -> str:
+        """
+        Decision function for conditional routing after SQL search.
+        
+        Args:
+            state: Current FAQ state
+            
+        Returns:
+            Next node name to execute
+        """
+        if state.get("answer") is not None:
+            # Answer found in SQL, so we can finalize
+            print("🔀 Routing to: finalize_response (SQL match found)")
+            return "finalize_response"
+        else:
+            # No answer from SQL, proceed to vector search
+            print("🔀 Routing to: search_vector_database (no SQL match)")
+            return "search_vector_database"
+    # --- END NEW ROUTING FUNCTION ---
+
     def should_use_llm(self, state: FAQState) -> str:
         """
-        Decision function for conditional routing
+        Decision function for conditional routing after vector search.
         
         Args:
             state: Current FAQ state

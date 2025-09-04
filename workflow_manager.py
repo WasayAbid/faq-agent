@@ -1,9 +1,4 @@
-"""
-workflow_manager.py
-==================
-LangGraph workflow definition for Dubai FAQ system.
-Contains only the workflow structure and graph management.
-"""
+# workflow_manager.py
 
 from typing import Literal
 from faq_functions import FAQState, faq_service
@@ -38,30 +33,42 @@ class WorkflowManager:
         # Create the StateGraph
         workflow = StateGraph(FAQState)
         
-        # Add nodes - these are the processing functions
+        # --- MODIFIED --- Add all nodes, including the new SQL search node
+        workflow.add_node("query_sql_database", faq_service.query_sql_database)
         workflow.add_node("search_vector_database", faq_service.search_vector_database)
         workflow.add_node("call_llm_for_answer", faq_service.call_llm_for_answer)
         workflow.add_node("finalize_response", faq_service.finalize_response)
         
-        # Add edges to define the flow
-        # START -> search_vector_database (always start here)
-        workflow.add_edge(START, "search_vector_database")
+        # --- MODIFIED --- Add edges to define the NEW flow
         
-        # Conditional edge: search_vector_database -> finalize_response OR call_llm_for_answer
+        # 1. The workflow now starts at the SQL search
+        workflow.add_edge(START, "query_sql_database")
+        
+        # 2. After searching SQL, decide where to go next
         workflow.add_conditional_edges(
-            "search_vector_database",  # From this node
-            faq_service.should_use_llm,  # Decision function
+            "query_sql_database",           # From this node
+            faq_service.should_search_vector_db, # Use our NEW decision function
             {
-                "finalize_response": "finalize_response",  # If vector match found
-                "call_llm_for_answer": "call_llm_for_answer"  # If no vector match
+                "finalize_response": "finalize_response",  # If SQL match was found
+                "search_vector_database": "search_vector_database" # If no SQL match
             }
         )
         
-        # Both LLM and finalize paths end the workflow
+        # 3. The rest of the flow remains the same as before
+        workflow.add_conditional_edges(
+            "search_vector_database",
+            faq_service.should_use_llm,
+            {
+                "finalize_response": "finalize_response",
+                "call_llm_for_answer": "call_llm_for_answer"
+            }
+        )
+        
+        # 4. Both LLM and finalize paths end the workflow
         workflow.add_edge("call_llm_for_answer", "finalize_response")
         workflow.add_edge("finalize_response", END)
         
-        print("✅ LangGraph workflow compiled successfully!")
+        print("✅ LangGraph workflow compiled successfully with new SQL step!")
         return workflow.compile()
     
     def process_question(self, question: str) -> FAQState:
@@ -115,19 +122,26 @@ class SimpleWorkflow:
         """Execute the workflow steps manually"""
         print("🔄 Executing simple workflow...")
         
-        # Step 1: Search vector database
-        print("1️⃣ Searching vector database...")
-        state = faq_service.search_vector_database(initial_state)
-        
-        # Step 2: Call LLM if needed
+        # --- NEW --- Step 1: Search SQL database first
+        print("1️⃣ Searching SQL database...")
+        state = faq_service.query_sql_database(initial_state)
+
+        # --- MODIFIED --- Step 2: Search vector database (only if needed)
         if state.get("answer") is None:
-            print("2️⃣ Calling LLM for answer...")
+            print("2️⃣ Searching vector database...")
+            state = faq_service.search_vector_database(state)
+        else:
+            print("2️⃣ Skipping vector search (SQL match found)")
+
+        # --- MODIFIED --- Step 3: Call LLM if needed
+        if state.get("answer") is None:
+            print("3️⃣ Calling LLM for answer...")
             state = faq_service.call_llm_for_answer(state)
         else:
-            print("2️⃣ Skipping LLM (vector match found)")
+            print("3️⃣ Skipping LLM (answer already found)")
         
-        # Step 3: Finalize response
-        print("3️⃣ Finalizing response...")
+        # Step 4: Finalize response
+        print("4️⃣ Finalizing response...")
         state = faq_service.finalize_response(state)
         
         return state
